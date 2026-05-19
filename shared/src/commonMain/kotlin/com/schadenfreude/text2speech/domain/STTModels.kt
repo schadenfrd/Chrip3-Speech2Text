@@ -8,25 +8,25 @@ enum class Language(
     val phraseSetName: String
 ) {
     BULGARIAN(
-        displayName = "🇧🇬Bulgarian",
+        displayName = "🇧🇬 Bulgarian",
         languageCode = "bg-BG",
         recognizerName = "bg-recognizer",
         phraseSetName = "bulgarian-safety-terms-ps"
     ),
     ENGLISH(
-        displayName = "🇺🇸English",
+        displayName = "🇺🇸 English",
         languageCode = "en-US",
         recognizerName = "en-recognizer",
         phraseSetName = "english-safety-terms-ps"
     ),
     GERMAN(
-        displayName = "🇩🇪German",
+        displayName = "🇩🇪 German",
         languageCode = "de-DE",
         recognizerName = "de-recognizer",
         phraseSetName = "german-safety-terms-ps"
     ),
     ALBANIAN(
-        displayName = "🇦🇱Albanian",
+        displayName = "🇦🇱 Albanian",
         languageCode = "sq-AL",
         recognizerName = "sq-recognizer",
         phraseSetName = "albanian-safety-terms-ps"

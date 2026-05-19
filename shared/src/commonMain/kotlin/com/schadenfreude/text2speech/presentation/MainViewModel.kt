@@ -13,6 +13,7 @@ import com.schadenfreude.text2speech.platform.AudioRecorder
 import com.schadenfreude.text2speech.platform.FilePicker
 import com.schadenfreude.text2speech.platform.getAudioRecorder
 import com.schadenfreude.text2speech.platform.getFilePicker
+import com.schadenfreude.text2speech.util.logError
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -237,10 +238,11 @@ class MainViewModel(
                     ) 
                 }
             } catch (e: Exception) {
+                logError("MainViewModel", "Upload and transcribe failed", e)
                 _uiState.update { 
                     it.copy(
                         isLoading = false,
-                        errorMessage = "Upload Error: ${e.message}"
+                        errorMessage = "Upload Error [${e::class.simpleName}]: ${e.message}"
                     )
                 }
             }

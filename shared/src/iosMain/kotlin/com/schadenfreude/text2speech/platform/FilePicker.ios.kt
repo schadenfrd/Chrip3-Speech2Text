@@ -5,6 +5,7 @@ import platform.Foundation.*
 import platform.UIKit.*
 import platform.darwin.NSObject
 import platform.posix.memcpy
+import com.schadenfreude.text2speech.util.logError
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -31,6 +32,7 @@ class IosFilePicker : FilePicker {
 
                 val data = NSData.dataWithContentsOfURL(url)
                 if (data == null) {
+                    logError("IosFilePicker", "Failed to read data from URL: $url")
                     continuation.resume(null)
                     return
                 }

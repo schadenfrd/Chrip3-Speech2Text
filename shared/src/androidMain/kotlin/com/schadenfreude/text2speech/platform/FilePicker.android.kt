@@ -4,6 +4,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import com.schadenfreude.text2speech.util.logError
 import java.util.UUID
 import kotlin.coroutines.resume
 
@@ -28,6 +29,7 @@ class AndroidFilePicker : FilePicker {
                     inputStream?.close()
                     continuation.resume(bytes)
                 } catch (e: Exception) {
+                    logError("AndroidFilePicker", "Failed to read file from URI: $uri", e)
                     continuation.resume(null)
                 }
             }
