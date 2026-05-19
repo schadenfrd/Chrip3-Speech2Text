@@ -1,0 +1,30 @@
+# Gradle
+build/
+*/build/
+**/build/
+!src/**/build/
+.gradle
+
+# IDEs
+*.iml
+.kotlin
+local.properties
+.idea
+captures
+.externalNativeBuild
+.cxx
+node_modules/
+
+# OS specific
+.DS_Store
+
+# iOS
+iosApp/iosApp.xcworkspace/xcuserdata/
+iosApp/Pods/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/project.xcworkspace/
+!*.xcworkspace/contents.xcworkspacedata
+**/xcshareddata/WorkspaceSettings.xcsettings
+xcuserdata
