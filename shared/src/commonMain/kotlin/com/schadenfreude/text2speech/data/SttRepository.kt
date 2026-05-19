@@ -16,7 +16,6 @@ import com.schadenfreude.text2speech.util.logError
 import com.schadenfreude.text2speech.util.logInfo
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logger
@@ -24,18 +23,22 @@ import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okio.ByteString.Companion.toByteString
 import kotlin.io.encoding.Base64
 
@@ -47,29 +50,31 @@ data class RestRecognizeRequest(
 )
 
 @Serializable
-class RestAutoDecodingConfig
-
-@Serializable
 data class RestRecognitionConfig(
     val model: String = "chirp_3",
+    @SerialName("language_codes")
     val languageCodes: List<String>,
     val features: RestRecognitionFeatures,
-    val autoDecodingConfig: RestAutoDecodingConfig = RestAutoDecodingConfig()
+    val adaptation: RestAdaptation? = null,
+    @SerialName("auto_decoding_config")
+    val autoDecodingConfig: JsonObject = JsonObject(emptyMap()),
 )
 
 @Serializable
 data class RestRecognitionFeatures(
+    @SerialName("enable_automatic_punctuation")
     val enableAutomaticPunctuation: Boolean = true,
-    val adaptation: RestAdaptation? = null
 )
 
 @Serializable
 data class RestAdaptation(
+    @SerialName("phrase_sets")
     val phraseSets: List<RestPhraseSetContext>
 )
 
 @Serializable
 data class RestPhraseSetContext(
+    @SerialName("phrase_set")
     val phraseSet: String
 )
 
@@ -138,41 +143,49 @@ open class DefaultSttRepository(
             val requestBody = RestRecognizeRequest(
                 config = RestRecognitionConfig(
                     languageCodes = listOf(config.language.languageCode),
-                    features = RestRecognitionFeatures(
-                        enableAutomaticPunctuation = true,
-                        adaptation = RestAdaptation(
-                            phraseSets = listOf(RestPhraseSetContext(phraseSet = config.language.phraseSetId))
-                        )
-                    )
+                    adaptation = RestAdaptation(
+                        phraseSets = listOf(RestPhraseSetContext(phraseSet = config.language.phraseSetId))
+                    ),
+                    features = RestRecognitionFeatures(enableAutomaticPunctuation = true,)
                 ),
                 content = base64Audio
             )
 
-            val url =
-                "https://${BuildKonfig.GCP_REGION}-speech.googleapis.com/v2/${config.language.recognizerId}:recognize"
+            val url = "https://${BuildKonfig.GCP_REGION}-speech.googleapis.com/v2/${config.language.recognizerId}:recognize"
             logInfo("SttRepository", "Request URL: $url")
 
-            val response: RestRecognizeResponse = httpClient.post(url) {
+            // 1. Get the raw HttpResponse FIRST without parsing the body
+            val response: HttpResponse = httpClient.post(url) {
                 header(HttpHeaders.Authorization, "Bearer $token")
                 contentType(ContentType.Application.Json)
                 setBody(requestBody)
-            }.body()
+            }
 
-            val transcript =
-                response.results?.firstOrNull()?.alternatives?.firstOrNull()?.transcript
-            return transcript ?: "No speech recognized."
-
-        } catch (e: ClientRequestException) {
-            val errorBody = e.response.bodyAsText()
-            logError("SttRepository", "REST API Error: $errorBody", e)
-            when (e.response.status) {
-                HttpStatusCode.TooManyRequests -> throw Exception("API Quota Exceeded. Please try again later.")
-                HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> throw Exception("Authentication failed. Reconnecting...")
-                else -> throw Exception("API Error (${e.response.status.value}): $errorBody")
+            // 2. Check if it's a success (200-299)
+            if (response.status.isSuccess()) {
+                // ONLY parse if we know it's a success
+                val successResponse: RestRecognizeResponse = response.body()
+                val transcript = successResponse.results?.firstOrNull()?.alternatives?.firstOrNull()?.transcript
+                return transcript ?: "No speech recognized."
+            } else {
+                // 3. It failed! Read the raw text so Kotlinx Serialization doesn't crash
+                val errorBody = response.bodyAsText()
+                logError("SttRepository", "REST API Error (${response.status.value}): $errorBody")
+                
+                when (response.status) {
+                    HttpStatusCode.BadRequest -> throw Exception("Bad Request: $errorBody")
+                    HttpStatusCode.TooManyRequests -> throw Exception("API Quota Exceeded. Please try again later.")
+                    HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden -> throw Exception("Authentication failed. Reconnecting...")
+                    else -> throw Exception("API Error (${response.status.value}): $errorBody")
+                }
             }
         } catch (e: Exception) {
-            logError("SttRepository", "Network error", e)
-            throw Exception("Network error: ${e.message}")
+            // If it's already an Exception we threw above, just rethrow it
+            if (e.message?.contains("Bad Request") == true || e.message?.contains("API Error") == true || e.message?.contains("Auth") == true) {
+                throw e
+            }
+            logError("SttRepository", "Network or Serialization error", e)
+            throw Exception("Error: ${e.message}")
         }
     }
 
@@ -239,8 +252,8 @@ open class DefaultSttRepository(
                 for (response in responseChannel) {
                     response.results.forEach { result ->
                         val transcript = result.alternatives.firstOrNull()?.transcript
-                        if (transcript != null && transcript.isNotBlank()) {
-                            if (result.is_final == true) {
+                        if (!transcript.isNullOrBlank()) {
+                            if (result.is_final) {
                                 emit(TranscriptionResult.Final(transcript))
                             } else {
                                 emit(TranscriptionResult.Interim(transcript))

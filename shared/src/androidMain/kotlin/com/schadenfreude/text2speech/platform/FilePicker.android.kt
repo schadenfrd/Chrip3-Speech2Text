@@ -1,5 +1,7 @@
 package com.schadenfreude.text2speech.platform
 
+import android.content.Context
+import android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -16,7 +18,12 @@ class AndroidFilePicker : FilePicker {
             val key = UUID.randomUUID().toString()
             val launcher = activity.activityResultRegistry.register(
                 key,
-                ActivityResultContracts.GetContent()
+                object : ActivityResultContracts.GetContent() {
+                    override fun createIntent(context: Context, input: String): Intent {
+                        return super.createIntent(context, input)
+                            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/wav", "audio/flac", "audio/mpeg"))
+                    }
+                }
             ) { uri ->
                 if (uri == null) {
                     continuation.resume(null)
