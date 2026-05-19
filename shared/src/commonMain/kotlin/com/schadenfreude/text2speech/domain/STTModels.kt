@@ -8,25 +8,25 @@ enum class Language(
     val phraseSetName: String
 ) {
     BULGARIAN(
-        displayName = "Bulgarian",
+        displayName = "🇧🇬Bulgarian",
         languageCode = "bg-BG",
-        recognizerName = "fot-stt-recognizer-bg",
+        recognizerName = "bg-recognizer",
         phraseSetName = "bulgarian-safety-terms-ps"
     ),
     ENGLISH(
-        displayName = "English",
+        displayName = "🇺🇸English",
         languageCode = "en-US",
         recognizerName = "en-recognizer",
         phraseSetName = "english-safety-terms-ps"
     ),
     GERMAN(
-        displayName = "German",
+        displayName = "🇩🇪German",
         languageCode = "de-DE",
         recognizerName = "de-recognizer",
         phraseSetName = "german-safety-terms-ps"
     ),
     ALBANIAN(
-        displayName = "Albanian",
+        displayName = "🇦🇱Albanian",
         languageCode = "sq-AL",
         recognizerName = "sq-recognizer",
         phraseSetName = "albanian-safety-terms-ps"
@@ -34,10 +34,6 @@ enum class Language(
 
     val recognizerId: String get() = "projects/${BuildKonfig.PROJECT_ID}/locations/${BuildKonfig.GCP_REGION}/recognizers/$recognizerName"
     val phraseSetId: String get() = "projects/${BuildKonfig.PROJECT_ID}/locations/${BuildKonfig.GCP_REGION}/phraseSets/$phraseSetName"
-
-    companion object {
-        fun fromDisplayName(name: String): Language = entries.find { it.displayName == name } ?: ENGLISH
-    }
 }
 
 data class STTConfig(
