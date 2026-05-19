@@ -15,10 +15,10 @@ buildkonfig {
     packageName = "com.schadenfreude.text2speech"
     exposeObjectWithName = "BuildKonfig"
     defaultConfigs {
-        buildConfigField(STRING, "PROJECT_ID", "")
-        buildConfigField(STRING, "GCP_REGION", "")
-        buildConfigField(STRING, "AUTH_BACKEND_URL", "")
-        buildConfigField(STRING, "POC_BEARER_TOKEN", "")
+        buildConfigField(STRING, "PROJECT_ID", "project number in https://console.cloud.google.com/welcome")
+        buildConfigField(STRING, "GCP_REGION", "europe-west3")
+        buildConfigField(STRING, "AUTH_BACKEND_URL", "https://api.yourcompany.com/stt/token")
+        buildConfigField(STRING, "POC_BEARER_TOKEN", "run `gcloud auth print-access-token` in the Google cloud console for a 1H access token")
     }
 }
 
@@ -77,6 +77,7 @@ kotlin {
             implementation(libs.androidx.lifecycle.runtimeCompose)
             
             implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.logging)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.wire.runtime)

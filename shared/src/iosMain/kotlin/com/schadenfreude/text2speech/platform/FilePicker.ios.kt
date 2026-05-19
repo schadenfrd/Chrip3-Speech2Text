@@ -1,32 +1,44 @@
 package com.schadenfreude.text2speech.platform
 
-import kotlinx.cinterop.*
-import platform.Foundation.*
-import platform.UIKit.*
+import com.schadenfreude.text2speech.util.logError
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
+import kotlinx.coroutines.suspendCancellableCoroutine
+import platform.Foundation.NSData
+import platform.Foundation.NSURL
+import platform.Foundation.dataWithContentsOfURL
+import platform.UIKit.UIDocumentPickerDelegateProtocol
+import platform.UIKit.UIDocumentPickerMode
+import platform.UIKit.UIDocumentPickerViewController
 import platform.darwin.NSObject
 import platform.posix.memcpy
-import com.schadenfreude.text2speech.util.logError
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 class IosFilePicker : FilePicker {
-    override suspend fun pickFile(): ByteArray? = suspendCoroutine { continuation ->
+    private var activeDelegate: UIDocumentPickerDelegateProtocol? = null
+
+    override suspend fun pickFile(): ByteArray? = suspendCancellableCoroutine { continuation ->
         val viewController = IosContext.getViewController() ?: run {
             continuation.resume(null)
-            return@suspendCoroutine
+            return@suspendCancellableCoroutine
         }
 
         @Suppress("DEPRECATION")
         val picker = UIDocumentPickerViewController(
-            documentTypes = listOf("public.audio"), 
+            documentTypes = listOf("public.audio"),
             inMode = UIDocumentPickerMode.UIDocumentPickerModeImport
         )
 
-        picker.delegate = object : NSObject(), UIDocumentPickerDelegateProtocol {
-            override fun documentPicker(controller: UIDocumentPickerViewController, didPickDocumentsAtURLs: List<*>) {
+        activeDelegate = object : NSObject(), UIDocumentPickerDelegateProtocol {
+            override fun documentPicker(
+                controller: UIDocumentPickerViewController,
+                didPickDocumentsAtURLs: List<*>
+            ) {
                 val url = didPickDocumentsAtURLs.firstOrNull() as? NSURL
                 if (url == null) {
                     continuation.resume(null)
+                    activeDelegate = null
                     return
                 }
 
@@ -34,16 +46,21 @@ class IosFilePicker : FilePicker {
                 if (data == null) {
                     logError("IosFilePicker", "Failed to read data from URL: $url")
                     continuation.resume(null)
+                    activeDelegate = null
                     return
                 }
 
                 continuation.resume(data.toByteArray())
+                activeDelegate = null
             }
 
             override fun documentPickerWasCancelled(controller: UIDocumentPickerViewController) {
                 continuation.resume(null)
+                activeDelegate = null
             }
         }
+
+        picker.delegate = activeDelegate
 
         viewController.presentViewController(picker, animated = true, completion = null)
     }

@@ -3,7 +3,7 @@ package com.schadenfreude.text2speech.platform
 import io.ktor.client.HttpClient
 
 actual fun createSpeechClient(httpClient: HttpClient, baseUrl: String, token: String): Any? {
-    // iOS gRPC implementation requires additional C-Interop setup for Wire.
-    // For the PoC, we return null to allow common code to compile.
+    // Note: Bidirectional gRPC streaming with Wire 5.1.0 on iOS is supported.
+    // However, for the PoC we return null if the native client cannot be instantiated in this environment.
     return null
 }

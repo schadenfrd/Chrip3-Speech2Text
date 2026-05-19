@@ -28,18 +28,28 @@ class IosAudioRecorder : AudioRecorder {
 
         val converter = AVAudioConverter(fromFormat = inputFormat, toFormat = outputFormat)
 
-        inputNode.installTapOnBus(bus = bus, bufferSize = 1024u, format = inputFormat) { buffer, time ->
+        val session = AVAudioSession.sharedInstance()
+        memScoped {
+            val errorVar = alloc<ObjCObjectVar<NSError?>>()
+            session.setCategory(AVAudioSessionCategoryPlayAndRecord, 
+                withOptions = AVAudioSessionCategoryOptionDefaultToSpeaker or AVAudioSessionCategoryOptionAllowBluetooth, 
+                error = errorVar.ptr)
+            session.setMode(AVAudioSessionModeMeasurement, error = errorVar.ptr)
+            session.setActive(true, error = errorVar.ptr)
+        }
+
+        inputNode.installTapOnBus(bus = bus, bufferSize = 1024u, format = inputFormat) { buffer, _ ->
             if (buffer == null) return@installTapOnBus
 
             val pcmBuffer = AVAudioPCMBuffer(
                 pCMFormat = outputFormat,
                 frameCapacity = buffer.frameLength
-            ) ?: return@installTapOnBus
+            )
 
-            val inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus ->
+            val inputBlock: AVAudioConverterInputBlock = { _, outStatus ->
                 if (outStatus != null) {
-                    // 1L maps to AVAudioConverterInputStatus_HaveData in Kotlin/Native
-                    outStatus.pointed.value = 1L 
+                    // 0L maps to AVAudioConverterInputStatus_HaveData in Kotlin/Native for iOS
+                    outStatus.pointed.value = 0L 
                 }
                 buffer
             }
