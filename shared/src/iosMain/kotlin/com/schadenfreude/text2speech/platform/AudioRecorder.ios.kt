@@ -12,8 +12,13 @@ class IosAudioRecorder : AudioRecorder {
     private val audioEngine = AVAudioEngine()
     private var isRecording = false
 
-    @OptIn(ExperimentalForeignApi::class)
+    @OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
     override fun startRecording(): Flow<ByteArray> = callbackFlow {
+        if (isRecording) {
+            close(IllegalStateException("Already recording"))
+            return@callbackFlow
+        }
+
         val inputNode = audioEngine.inputNode
         val bus = 0uL
         val inputFormat = inputNode.inputFormatForBus(bus)
@@ -74,8 +79,15 @@ class IosAudioRecorder : AudioRecorder {
 
         audioEngine.prepare()
         try {
-            audioEngine.startAndReturnError(null)
-            isRecording = true
+            memScoped {
+                val errorVar = alloc<ObjCObjectVar<NSError?>>()
+                if (!audioEngine.startAndReturnError(errorVar.ptr)) {
+                    val error = errorVar.value
+                    close(Exception("AudioEngine failed to start: ${error?.localizedDescription}"))
+                } else {
+                    isRecording = true
+                }
+            }
         } catch (e: Exception) {
             close(e)
         }
