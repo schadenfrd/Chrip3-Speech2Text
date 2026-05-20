@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1D7564C22FBDDCB100015CB2 /* GRPCNIOTransportHTTP2 in Frameworks */ = {isa = PBXBuildFile; productRef = 1D7564C12FBDDCB100015CB2 /* GRPCNIOTransportHTTP2 */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		9FA7BF8DBD486D462E46334E /* Chirp3Text2SpeechDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Chirp3Text2SpeechDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -41,17 +45,26 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1D7564C22FBDDCB100015CB2 /* GRPCNIOTransportHTTP2 in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1D7564BF2FBDD6E900015CB2 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		300C86F15DD630BFA72FAAD2 = {
 			isa = PBXGroup;
 			children = (
 				D1BDF4BD070192179146B317 /* Configuration */,
 				E0C94F1684EF2895BB8A744D /* iosApp */,
+				1D7564BF2FBDD6E900015CB2 /* Frameworks */,
 				5BDF386EC1A26886B9CE3A08 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -85,6 +98,7 @@
 			);
 			name = iosApp;
 			packageProductDependencies = (
+				1D7564C12FBDDCB100015CB2 /* GRPCNIOTransportHTTP2 */,
 			);
 			productName = iosApp;
 			productReference = 9FA7BF8DBD486D462E46334E /* Chirp3Text2SpeechDemo.app */;
@@ -114,6 +128,9 @@
 			);
 			mainGroup = 300C86F15DD630BFA72FAAD2;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1D7564C02FBDDCB100015CB2 /* XCRemoteSwiftPackageReference "grpc-swift-nio-transport" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5BDF386EC1A26886B9CE3A08 /* Products */;
 			projectDirPath = "";
@@ -368,6 +385,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1D7564C02FBDDCB100015CB2 /* XCRemoteSwiftPackageReference "grpc-swift-nio-transport" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/grpc/grpc-swift-nio-transport.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1D7564C12FBDDCB100015CB2 /* GRPCNIOTransportHTTP2 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1D7564C02FBDDCB100015CB2 /* XCRemoteSwiftPackageReference "grpc-swift-nio-transport" */;
+			productName = GRPCNIOTransportHTTP2;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4BE533BFF1F5A96390A380BA /* Project object */;
 }
