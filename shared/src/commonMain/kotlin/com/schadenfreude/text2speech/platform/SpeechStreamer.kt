@@ -26,3 +26,5 @@ interface SpeechStreamer {
      */
     fun stopStreaming()
 }
+
+expect fun getSpeechStreamer(): SpeechStreamer

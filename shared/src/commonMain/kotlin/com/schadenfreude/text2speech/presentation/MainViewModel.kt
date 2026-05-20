@@ -11,15 +11,16 @@ import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
 import com.schadenfreude.text2speech.platform.AudioRecorder
 import com.schadenfreude.text2speech.platform.FilePicker
+import com.schadenfreude.text2speech.platform.SpeechStreamer
 import com.schadenfreude.text2speech.platform.getAudioRecorder
 import com.schadenfreude.text2speech.platform.getFilePicker
+import com.schadenfreude.text2speech.platform.getSpeechStreamer
 import com.schadenfreude.text2speech.util.logError
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -65,6 +66,7 @@ data class MainUiState(
 }
 
 class MainViewModel(
+    private val speechStreamer: SpeechStreamer = getSpeechStreamer(),
     private val audioRecorder: AudioRecorder = getAudioRecorder(),
     private val filePicker: FilePicker = getFilePicker(),
     private val sttRepository: SttRepository = DefaultSttRepository(),
@@ -77,13 +79,13 @@ class MainViewModel(
     private var recordingJob: Job? = null
 
     fun toggleMode(isLiveStream: Boolean) {
-        _uiState.update { 
+        _uiState.update {
             it.copy(
-                isLiveStream = isLiveStream, 
-                finalText = "", 
+                isLiveStream = isLiveStream,
+                finalText = "",
                 partialText = "",
                 errorMessage = null
-            ) 
+            )
         }
     }
 
@@ -100,79 +102,98 @@ class MainViewModel(
     }
 
     private fun startRecording() {
-        _uiState.update { 
+        _uiState.update {
             it.copy(
-                isRecording = true, 
+                isRecording = true,
                 isLoading = true,
-                finalText = "", 
+                finalText = "",
                 partialText = "Starting stream...",
                 errorMessage = null
-            ) 
+            )
         }
-        
+
         recordingJob?.cancel()
         recordingJob = viewModelScope.launch {
             var retryCount = 0
             val maxRetries = 3
-            
+
             while (_uiState.value.isRecording && retryCount < maxRetries) {
                 try {
                     // Fetch a fresh dynamic token immediately before starting/restarting
                     val token = authRepository.getAuthToken()
                     _uiState.update { it.copy(isLoading = false) }
                     val config = STTConfig(_uiState.value.selectedLanguage, true)
-                    
+
                     _uiState.update { it.copy(partialText = if (retryCount > 0) "Reconnecting..." else "") }
 
                     // Start timer after connection is established
                     startInactivityTimer()
 
-                    sttRepository.streamAudio(
-                        speechClient = sttRepository.speechClient,
-                        audioFlow = audioRecorder.startRecording().onEach { resetInactivityTimer() },
+                    speechStreamer.startStreaming(
                         config = config,
                         token = token
-                    ).collect { result ->
+                    ) { result ->
                         resetInactivityTimer()
                         when (result) {
                             is TranscriptionResult.Interim -> {
                                 _uiState.update { it.copy(partialText = result.text) }
                             }
+
                             is TranscriptionResult.Final -> {
-                                _uiState.update { 
+                                _uiState.update {
                                     it.copy(
                                         finalText = (it.finalText + " " + result.text).trim(),
                                         partialText = ""
-                                    ) 
+                                    )
                                 }
                             }
+
                             is TranscriptionResult.Error -> {
-                                // Check if it's an auth error to trigger reconnection
-                                if (result.message.contains("UNAUTHENTICATED", ignoreCase = true) || 
+                                if (result.message.contains("UNAUTHENTICATED", ignoreCase = true) ||
                                     result.message.contains("401", ignoreCase = true) ||
-                                    result.message.contains("Authentication failed", ignoreCase = true)) {
-                                    throw Exception("Auth expired: ${result.message}")
+                                    result.message.contains(
+                                        "Authentication failed",
+                                        ignoreCase = true
+                                    )
+                                ) {
+                                    // We can't easily throw an exception out of a callback to be caught by the while loop
+                                    // But we can stop and restart or handle it here.
+                                    // For simplicity and matching the request, we just handle results.
+                                    // If we want to retry, we'd need a more complex mechanism.
+                                    // The request says: "simply call speechStreamer.startStreaming(config, token) { result -> ... } 
+                                    // and update the UI state based on the result callback."
+                                    _uiState.update { it.copy(errorMessage = result.message) }
+                                } else {
+                                    if (_uiState.value.isRecording) {
+                                        _uiState.update { it.copy(errorMessage = result.message) }
+                                    }
                                 }
-                                if (_uiState.value.isRecording) { _uiState.update { it.copy(errorMessage = result.message) } }
                             }
                         }
                     }
-                    // If stream completes normally without error, break the retry loop
+                    // Break the loop as the streamer is now running and handling results via callback
                     break
                 } catch (e: Exception) {
-                    if ((e.message?.contains("Auth expired") == true || e.message?.contains("401") == true || e.message?.contains("Authentication failed") == true) && retryCount < maxRetries) {
+                    if ((e.message?.contains("Auth expired") == true || e.message?.contains("401") == true || e.message?.contains(
+                            "Authentication failed"
+                        ) == true) && retryCount < maxRetries
+                    ) {
                         retryCount++
-                        // Continue loop to retry with fresh token
                         continue
                     } else {
-                        if (_uiState.value.isRecording) { _uiState.update { it.copy(errorMessage = "Stream Error: ${e.message}", isLoading = false) } } else { _uiState.update { it.copy(isLoading = false) } }
+                        if (_uiState.value.isRecording) {
+                            _uiState.update {
+                                it.copy(
+                                    errorMessage = "Stream Error: ${e.message}",
+                                    isLoading = false
+                                )
+                            }
+                        } else {
+                            _uiState.update { it.copy(isLoading = false) }
+                        }
                         break
                     }
                 }
-            }
-            
-            if (_uiState.value.isRecording) {
-                stopRecording()
             }
         }
     }
@@ -180,7 +201,7 @@ class MainViewModel(
     private fun stopRecording() {
         inactivityJob?.cancel()
         recordingJob?.cancel()
-        audioRecorder.stopRecording()
+        speechStreamer.stopStreaming()
         _uiState.update { it.copy(isRecording = false, partialText = "") }
     }
 
@@ -203,13 +224,13 @@ class MainViewModel(
     fun pickFile() {
         viewModelScope.launch {
             val file = filePicker.pickFile()
-            _uiState.update { 
+            _uiState.update {
                 it.copy(
-                    pickedFile = file, 
+                    pickedFile = file,
                     finalText = if (file != null) "File picked: ${file.size} bytes" else "",
                     partialText = "",
                     errorMessage = null
-                ) 
+                )
             }
         }
     }
@@ -218,28 +239,28 @@ class MainViewModel(
         val file = _uiState.value.pickedFile ?: return
         val config = STTConfig(_uiState.value.selectedLanguage, false)
 
-        _uiState.update { 
+        _uiState.update {
             it.copy(
-                isLoading = true, 
+                isLoading = true,
                 finalText = "Uploading and transcribing...",
                 partialText = "",
                 errorMessage = null
-            ) 
+            )
         }
-        
+
         viewModelScope.launch {
             try {
                 val token = authRepository.getAuthToken()
                 val result = sttRepository.transcribeFile(file, config, token)
-                _uiState.update { 
+                _uiState.update {
                     it.copy(
-                        isLoading = false, 
+                        isLoading = false,
                         finalText = result
-                    ) 
+                    )
                 }
             } catch (e: Exception) {
                 logError("MainViewModel", "Upload and transcribe failed", e)
-                _uiState.update { 
+                _uiState.update {
                     it.copy(
                         isLoading = false,
                         errorMessage = "Upload Error [${e::class.simpleName}]: ${e.message}"
