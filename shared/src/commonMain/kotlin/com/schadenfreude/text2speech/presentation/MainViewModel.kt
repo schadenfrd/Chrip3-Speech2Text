@@ -67,7 +67,6 @@ data class MainUiState(
 
 class MainViewModel(
     private val speechStreamer: SpeechStreamer = getSpeechStreamer(),
-    private val audioRecorder: AudioRecorder = getAudioRecorder(),
     private val filePicker: FilePicker = getFilePicker(),
     private val sttRepository: SttRepository = DefaultSttRepository(),
     private val authRepository: AuthRepository = DefaultAuthRepository()
