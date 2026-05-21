@@ -15,7 +15,7 @@ buildkonfig {
     packageName = "com.schadenfreude.text2speech"
     exposeObjectWithName = "BuildKonfig"
     defaultConfigs {
-        buildConfigField(STRING, "PROJECT_ID", "project number in https://console.cloud.google.com/welcome")
+        buildConfigField(STRING, "PROJECT_ID", "run `gcloud config get-value project")
         buildConfigField(STRING, "GCP_REGION", "europe-west3")
         buildConfigField(STRING, "AUTH_BACKEND_URL", "https://api.yourcompany.com/stt/token")
         buildConfigField(STRING, "POC_BEARER_TOKEN", "run `gcloud auth print-access-token` in the Google cloud console for a 1H access token")
