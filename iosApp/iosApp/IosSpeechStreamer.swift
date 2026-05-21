@@ -14,6 +14,8 @@ class IosSpeechStreamer: NSObject, SpeechStreamer {
     private var streamingTask: Task<Void, Never>?
     private var continuation: AsyncStream<Google_Cloud_Speech_V2_StreamingRecognizeRequest>.Continuation?
     private let audioEngine = AVAudioEngine()
+    /// Internal accumulator buffer to hold raw audio bytes before dispatching them over the network.
+    private var audioDataBuffer = Data()
 
     func startStreaming(config: STTConfig, token: String, onResult: @escaping (TranscriptionResult) -> Void) {
         // Ensure any previous streaming is stopped
@@ -152,13 +154,21 @@ class IosSpeechStreamer: NSObject, SpeechStreamer {
 
         let converter = AVAudioConverter(from: inputFormat, to: outputFormat)!
 
-        inputNode.installTap(onBus: bus, bufferSize: 1024, format: inputFormat) { [weak self] (buffer, time) in
+        // Use an increased buffer size ceiling to ensure data safety on high sample-rate hardware
+        inputNode.installTap(onBus: bus, bufferSize: 4096, format: inputFormat) { [weak self] (buffer, time) in
             guard let self = self else { return }
 
             let pcmBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: buffer.frameLength)!
             var error: NSError?
 
+            // FIXED: Prevent audio looping corruption inside downsampling routines by maintaining state tracking
+            var hasConsumedInput = false
             let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
+                if hasConsumedInput {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                hasConsumedInput = true
                 outStatus.pointee = .haveData
                 return buffer
             }
@@ -166,15 +176,22 @@ class IosSpeechStreamer: NSObject, SpeechStreamer {
             converter.convert(to: pcmBuffer, error: &error, withInputFrom: inputBlock)
 
             if let channelData = pcmBuffer.int16ChannelData {
-                // 16-bit = 2 bytes per frame
-                let audioData = Data(bytes: channelData[0], count: Int(pcmBuffer.frameLength) * 2)
+                let length = Int(pcmBuffer.frameLength) * 2
+                let convertedData = Data(bytes: channelData[0], count: length)
 
-                let audioRequest = Google_Cloud_Speech_V2_StreamingRecognizeRequest.with {
-                    $0.audio = audioData
+                // Accumulate the downsampled bytes into the class-scoped persistent buffer
+                self.audioDataBuffer.append(convertedData)
+
+                // FIXED: Network Flooding. 3200 bytes matches exactly 100ms of audio frame slices at 16kHz Mono Int16
+                while self.audioDataBuffer.count >= 3200 {
+                    let chunk = self.audioDataBuffer.prefix(3200)
+                    self.audioDataBuffer.removeFirst(3200)
+
+                    let audioRequest = Google_Cloud_Speech_V2_StreamingRecognizeRequest.with {
+                        $0.audio = chunk
+                    }
+                    self.continuation?.yield(audioRequest)
                 }
-
-                // Yield the audio chunk to the gRPC request stream
-                self.continuation?.yield(audioRequest)
             }
         }
 
@@ -213,6 +230,9 @@ class IosSpeechStreamer: NSObject, SpeechStreamer {
             audioEngine.stop()
             audioEngine.inputNode.removeTap(onBus: 0)
         }
+
+        // Wipe data state to ensure zero back-to-back buffer bleeding artifacts
+        audioDataBuffer.removeAll()
 
         continuation?.finish()
         continuation = nil

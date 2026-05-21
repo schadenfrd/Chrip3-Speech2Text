@@ -9,10 +9,8 @@ import com.schadenfreude.text2speech.data.SttRepository
 import com.schadenfreude.text2speech.domain.Language
 import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
-import com.schadenfreude.text2speech.platform.AudioRecorder
 import com.schadenfreude.text2speech.platform.FilePicker
 import com.schadenfreude.text2speech.platform.SpeechStreamer
-import com.schadenfreude.text2speech.platform.getAudioRecorder
 import com.schadenfreude.text2speech.platform.getFilePicker
 import com.schadenfreude.text2speech.platform.getSpeechStreamer
 import com.schadenfreude.text2speech.util.logError
@@ -173,9 +171,11 @@ class MainViewModel(
                     // Break the loop as the streamer is now running and handling results via callback
                     break
                 } catch (e: Exception) {
-                    if ((e.message?.contains("Auth expired") == true || e.message?.contains("401") == true || e.message?.contains(
-                            "Authentication failed"
-                        ) == true) && retryCount < maxRetries
+                    if (
+                        (e.message?.contains("Auth expired") == true
+                                || e.message?.contains("401") == true
+                                || e.message?.contains("Authentication failed") == true)
+                        && retryCount < maxRetries
                     ) {
                         retryCount++
                         continue
