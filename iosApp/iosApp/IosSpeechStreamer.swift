@@ -1,60 +1,112 @@
-import Foundation
-import Shared
-import GRPC
-import NIO
 import AVFoundation
+import Foundation
+import GRPCCore
+import GRPCNIOTransportHTTP2
+import GRPCProtobuf
+import Shared
 
-/**
- * Swift implementation of the SpeechStreamer interface.
- * This class uses grpc-swift and SwiftNIO for bidirectional HTTP/2 streaming,
- * as it provides more robust support for streaming on iOS compared to KMP-native solutions.
- */
+/// Modernized Swift implementation of the SpeechStreamer interface using gRPC Swift V2.
+/// This class leverages Swift Concurrency (async/await, Tasks, AsyncStream) for a
+/// performant and clean streaming implementation.
+@available(iOS 15.0, *)
 class IosSpeechStreamer: NSObject, SpeechStreamer {
-    
-    private var group: EventLoopGroup?
-    private var channel: ClientConnection?
-    private var call: BidirectionalStreamingCall<Google_Cloud_Speech_V2_StreamingRecognizeRequest, Google_Cloud_Speech_V2_StreamingRecognizeResponse>?
-    
+
+    private var streamingTask: Task<Void, Never>?
+    private var continuation: AsyncStream<Google_Cloud_Speech_V2_StreamingRecognizeRequest>.Continuation?
     private let audioEngine = AVAudioEngine()
-    
+
     func startStreaming(config: STTConfig, token: String, onResult: @escaping (TranscriptionResult) -> Void) {
-        // 1. Initialize NIO EventLoopGroup (typically 1 thread for mobile)
-        group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        
-        // Determine the correct host based on region (e.g., europe-west3-speech.googleapis.com)
-        let regionPrefix = config.language.recognizerId.contains("europe-west3") ? "europe-west3-" : ""
-        let host = "\(regionPrefix)speech.googleapis.com"
-        
-        // 2. Create the gRPC Channel with TLS
-        channel = ClientConnection.usingPlatformAppropriateTLS(on: group!)
-            .connect(host: host, port: 443)
-        
-        // 3. Instantiate the generated gRPC Client
-        let client = Google_Cloud_Speech_V2_SpeechClient(channel: channel!)
-        
-        // 4. Setup Call Options (Google Cloud requires Bearer Token in Metadata)
-        var options = CallOptions()
-        options.customMetadata.add(name: "Authorization", value: "Bearer \(token)")
-        
-        // 5. Open the Bidirectional Stream
-        call = client.streamingRecognize(callOptions: options) { response in
-            // Handle results as they arrive from the server
-            for result in response.results {
-                guard let alternative = result.alternatives.first else { continue }
-                let transcript = alternative.transcript
-                
-                // Dispatch back to Main thread for UI updates
-                DispatchQueue.main.async {
-                    if result.isFinal {
-                        onResult(TranscriptionResult.Final(text: transcript))
-                    } else {
-                        onResult(TranscriptionResult.Interim(text: transcript))
+        // Ensure any previous streaming is stopped
+        stopStreaming()
+
+        // 1. Setup Audio Session for recording
+        setupAudioSession()
+
+        // 2. Create the AsyncStream to act as our request producer
+        let (requestStream, continuation) = AsyncStream<Google_Cloud_Speech_V2_StreamingRecognizeRequest>.makeStream()
+        self.continuation = continuation
+
+        // 3. Start the gRPC streaming task
+        streamingTask = Task {
+            do {
+                // Determine the correct host based on region
+                let regionPrefix = config.language.recognizerId.contains("europe-west3") ? "europe-west3-" : ""
+                let host = "\(regionPrefix)speech.googleapis.com"
+
+                // Configure the new HTTP2 transport with Apple's native TransportServices TLS
+                let transport = try HTTP2ClientTransport.TransportServices(
+                    target: .dns(host: host, port: 443),
+                    transportSecurity: .tls
+                )
+
+                let coreClient = GRPCClient(transport: transport)
+
+                // Use a TaskGroup to manage the client lifecycle and the streaming call
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await coreClient.runConnections()
+                    }
+
+                    group.addTask {
+                        let client = Google_Cloud_Speech_V2_Speech.Client(wrapping: coreClient)
+
+                        // Setup authentication metadata (Headers)
+                        var metadata = Metadata()
+                        metadata.addString("Bearer \(token)", forKey: "authorization")
+
+                        // FIXED: Use the V2 Producer closure pattern with RPCWriter
+                        let streamingRequest = GRPCCore.StreamingClientRequest(metadata: metadata) { writer in
+                            for await requestMessage in requestStream {
+                                try await writer.write(requestMessage)
+                            }
+                        }
+
+                        // A. Send the initial configuration message (REQUIRED)
+                        self.sendInitialConfig(config: config)
+
+                        // B. Start capturing audio bytes and yielding them to the continuation
+                        self.startAudioCapture()
+
+                        // C. Execute the bidirectional streaming call
+                        try await client.streamingRecognize(request: streamingRequest) { response in
+                            for try await message in response.messages {
+                                self.handleResponse(message, onResult: onResult)
+                            }
+                        }
+                    }
+
+                    // Wait for the first task to finish or throw
+                    try await group.next()
+                    group.cancelAll()
+                }
+            } catch {
+                if !(error is CancellationError) {
+                    DispatchQueue.main.async {
+                        onResult(TranscriptionResult.Error(message: "Stream Error: \(error.localizedDescription)"))
                     }
                 }
             }
+
+            // Cleanup when the task finishes
+            self.cleanup()
         }
-        
-        // 6. Send initial StreamingConfig (Required first message)
+    }
+
+    private func setupAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .measurement,
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
+            )
+            try session.setActive(true)
+        } catch {
+            print("Failed to setup audio session: \(error)")
+        }
+    }
+
+    private func sendInitialConfig(config: STTConfig) {
         let streamingConfig = Google_Cloud_Speech_V2_StreamingRecognitionConfig.with {
             $0.config = Google_Cloud_Speech_V2_RecognitionConfig.with {
                 $0.explicitDecodingConfig = Google_Cloud_Speech_V2_ExplicitDecodingConfig.with {
@@ -67,60 +119,65 @@ class IosSpeechStreamer: NSObject, SpeechStreamer {
                 $0.features = Google_Cloud_Speech_V2_RecognitionFeatures.with {
                     $0.enableAutomaticPunctuation = true
                 }
+                $0.adaptation = Google_Cloud_Speech_V2_SpeechAdaptation.with {
+                    $0.phraseSets = [
+                        Google_Cloud_Speech_V2_SpeechAdaptation.AdaptationPhraseSet.with {
+                            $0.phraseSet = config.language.phraseSetId
+                        }
+                    ]
+                }
             }
             $0.streamingFeatures = Google_Cloud_Speech_V2_StreamingRecognitionFeatures.with {
                 $0.interimResults = true
             }
         }
-        
+
         let firstRequest = Google_Cloud_Speech_V2_StreamingRecognizeRequest.with {
             $0.recognizer = config.language.recognizerId
             $0.streamingConfig = streamingConfig
         }
-        
-        _ = call?.sendMessage(firstRequest)
-        
-        // 7. Start capturing audio via AVAudioEngine
-        startAudioCapture()
+
+        continuation?.yield(firstRequest)
     }
-    
+
     private func startAudioCapture() {
         let inputNode = audioEngine.inputNode
         let bus = 0
         let inputFormat = inputNode.inputFormat(forBus: bus)
-        
-        // Output format must be 16kHz Mono PCM for STT
+
+        // Google STT V2 requires 16kHz, Mono, 16-bit PCM
         guard let outputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: false) else {
             return
         }
-        
+
         let converter = AVAudioConverter(from: inputFormat, to: outputFormat)!
-        
+
         inputNode.installTap(onBus: bus, bufferSize: 1024, format: inputFormat) { [weak self] (buffer, time) in
             guard let self = self else { return }
-            
+
             let pcmBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: buffer.frameLength)!
             var error: NSError?
-            
+
             let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
                 outStatus.pointee = .haveData
                 return buffer
             }
-            
+
             converter.convert(to: pcmBuffer, error: &error, withInputFrom: inputBlock)
-            
+
             if let channelData = pcmBuffer.int16ChannelData {
+                // 16-bit = 2 bytes per frame
                 let audioData = Data(bytes: channelData[0], count: Int(pcmBuffer.frameLength) * 2)
-                
+
                 let audioRequest = Google_Cloud_Speech_V2_StreamingRecognizeRequest.with {
                     $0.audio = audioData
                 }
-                
-                // Stream the audio bytes to Google
-                _ = self.call?.sendMessage(audioRequest)
+
+                // Yield the audio chunk to the gRPC request stream
+                self.continuation?.yield(audioRequest)
             }
         }
-        
+
         audioEngine.prepare()
         do {
             try audioEngine.start()
@@ -128,20 +185,36 @@ class IosSpeechStreamer: NSObject, SpeechStreamer {
             print("Could not start AVAudioEngine: \(error)")
         }
     }
-    
+
+    private func handleResponse(_ response: Google_Cloud_Speech_V2_StreamingRecognizeResponse, onResult: @escaping (TranscriptionResult) -> Void) {
+        for result in response.results {
+            guard let alternative = result.alternatives.first else { continue }
+            let transcript = alternative.transcript
+
+            // Update UI on the main thread
+            DispatchQueue.main.async {
+                if result.isFinal {
+                    onResult(TranscriptionResult.Final(text: transcript))
+                } else {
+                    onResult(TranscriptionResult.Interim(text: transcript))
+                }
+            }
+        }
+    }
+
     func stopStreaming() {
-        // Stop audio engine
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        
-        // Gracefully close the gRPC stream
-        _ = call?.sendEnd()
-        
-        // Shutdown NIO group
-        try? group?.syncShutdownGracefully()
-        
-        group = nil
-        channel = nil
-        call = nil
+        cleanup()
+        streamingTask?.cancel()
+        streamingTask = nil
+    }
+
+    private func cleanup() {
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+
+        continuation?.finish()
+        continuation = nil
     }
 }
