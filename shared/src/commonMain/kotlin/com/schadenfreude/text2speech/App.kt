@@ -22,12 +22,16 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +53,7 @@ import com.schadenfreude.text2speech.domain.Language
 import com.schadenfreude.text2speech.platform.getPermissionManager
 import com.schadenfreude.text2speech.presentation.MainViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun App(viewModel: MainViewModel = viewModel { MainViewModel() }) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -64,6 +69,25 @@ fun App(viewModel: MainViewModel = viewModel { MainViewModel() }) {
 
     MaterialTheme {
         Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Safety Inspection Dictation") },
+                    navigationIcon = {
+                        if (uiState.showSettings) {
+                            TextButton(onClick = { viewModel.toggleSettings() }) {
+                                Text("Back")
+                            }
+                        }
+                    },
+                    actions = {
+                        if (!uiState.showSettings) {
+                            TextButton(onClick = { viewModel.toggleSettings() }) {
+                                Text("Settings")
+                            }
+                        }
+                    }
+                )
+            },
             snackbarHost = { SnackbarHost(snackbarHostState) }
         ) { paddingValues ->
             Surface(
@@ -72,68 +96,69 @@ fun App(viewModel: MainViewModel = viewModel { MainViewModel() }) {
                     .padding(paddingValues),
                 color = MaterialTheme.colorScheme.background
             ) {
-                Column(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        "Safety Inspection Dictation",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                if (uiState.showSettings) {
+                    SettingsScreen(
+                        manualToken = uiState.manualToken,
+                        onTokenChanged = { viewModel.updateManualToken(it) },
+                        onBack = { viewModel.toggleSettings() }
                     )
-
-                    // 1. Input Toggle
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("File Upload")
-                        Switch(
-                            checked = uiState.isLiveStream,
-                            onCheckedChange = { viewModel.toggleMode(it) }
+                        // 1. Input Toggle
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("File Upload")
+                            Switch(
+                                checked = uiState.isLiveStream,
+                                onCheckedChange = { viewModel.toggleMode(it) }
+                            )
+                            Text("Live Stream")
+                        }
+
+                        // 2. Language Selector
+                        LanguageSelector(
+                            selectedLanguage = uiState.selectedLanguage,
+                            onLanguageSelected = { viewModel.selectLanguage(it) }
                         )
-                        Text("Live Stream")
+
+                        HorizontalDivider()
+
+                        // 3. Action Area
+                        ActionArea(
+                            isLiveStream = uiState.isLiveStream,
+                            isRecording = uiState.isRecording,
+                            isLoading = uiState.isLoading,
+                            onToggleRecording = {
+                                if (!uiState.isRecording) {
+                                    permissionManager.requestMicrophonePermission(
+                                        onGranted = { viewModel.toggleRecording() },
+                                        onDenied = { viewModel.onError("Microphone permission denied") }
+                                    )
+                                } else {
+                                    viewModel.toggleRecording()
+                                }
+                            },
+                            onPickFile = { viewModel.pickFile() },
+                            onUploadAndTranscribe = { viewModel.uploadAndTranscribe() }
+                        )
+
+                        HorizontalDivider()
+
+                        // 4. Result Area
+                        ResultArea(
+                            finalText = uiState.finalText,
+                            partialText = uiState.partialText
+                        )
                     }
-
-                    // 2. Language Selector
-                    LanguageSelector(
-                        selectedLanguage = uiState.selectedLanguage,
-                        onLanguageSelected = { viewModel.selectLanguage(it) }
-                    )
-
-                    HorizontalDivider()
-
-                    // 3. Action Area
-                    ActionArea(
-                        isLiveStream = uiState.isLiveStream,
-                        isRecording = uiState.isRecording,
-                        isLoading = uiState.isLoading,
-                        onToggleRecording = {
-                            if (!uiState.isRecording) {
-                                permissionManager.requestMicrophonePermission(
-                                    onGranted = { viewModel.toggleRecording() },
-                                    onDenied = { viewModel.onError("Microphone permission denied") }
-                                )
-                            } else {
-                                viewModel.toggleRecording()
-                            }
-                        },
-                        onPickFile = { viewModel.pickFile() },
-                        onUploadAndTranscribe = { viewModel.uploadAndTranscribe() }
-                    )
-
-                    HorizontalDivider()
-
-                    // 4. Result Area
-                    ResultArea(
-                        finalText = uiState.finalText,
-                        partialText = uiState.partialText
-                    )
                 }
             }
         }
@@ -248,6 +273,49 @@ fun ResultArea(finalText: String, partialText: String) {
                     }
                 })
             }
+        }
+    }
+}
+
+@Composable
+fun SettingsScreen(
+    manualToken: String,
+    onTokenChanged: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text(
+            "Settings",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        OutlinedTextField(
+            value = manualToken,
+            onValueChange = onTokenChanged,
+            label = { Text("Manual Auth Token") },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Enter token or leave blank for default") }
+        )
+
+        Text(
+            "If provided, this token will be used for STT requests instead of the default one.",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.secondary
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Back")
         }
     }
 }

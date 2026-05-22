@@ -30,7 +30,9 @@ data class MainUiState(
     val isRecording: Boolean = false,
     val pickedFile: ByteArray? = null,
     val isLoading: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val showSettings: Boolean = false,
+    val manualToken: String = ""
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -46,6 +48,8 @@ data class MainUiState(
         if (partialText != other.partialText) return false
         if (!pickedFile.contentEquals(other.pickedFile)) return false
         if (errorMessage != other.errorMessage) return false
+        if (showSettings != other.showSettings) return false
+        if (manualToken != other.manualToken) return false
 
         return true
     }
@@ -59,6 +63,8 @@ data class MainUiState(
         result = 31 * result + partialText.hashCode()
         result = 31 * result + (pickedFile?.contentHashCode() ?: 0)
         result = 31 * result + (errorMessage?.hashCode() ?: 0)
+        result = 31 * result + showSettings.hashCode()
+        result = 31 * result + manualToken.hashCode()
         return result
     }
 }
@@ -69,7 +75,7 @@ class MainViewModel(
     private val sttRepository: SttRepository = DefaultSttRepository(),
     private val authRepository: AuthRepository = DefaultAuthRepository()
 ) : ViewModel() {
-    private val _uiState = MutableStateFlow(MainUiState())
+    private val _uiState = MutableStateFlow(MainUiState(manualToken = authRepository.getManualToken() ?: ""))
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
     private var inactivityJob: Job? = null
@@ -267,6 +273,15 @@ class MainViewModel(
                 }
             }
         }
+    }
+
+    fun toggleSettings() {
+        _uiState.update { it.copy(showSettings = !it.showSettings) }
+    }
+
+    fun updateManualToken(token: String) {
+        _uiState.update { it.copy(manualToken = token) }
+        authRepository.setManualToken(token.ifBlank { null })
     }
 
     fun clearError() {
