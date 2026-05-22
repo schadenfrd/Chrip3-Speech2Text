@@ -2,17 +2,10 @@ package com.schadenfreude.text2speech.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.schadenfreude.text2speech.data.AuthRepository
-import com.schadenfreude.text2speech.data.DefaultAuthRepository
-import com.schadenfreude.text2speech.data.DefaultSttRepository
-import com.schadenfreude.text2speech.data.SttRepository
 import com.schadenfreude.text2speech.domain.Language
 import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
-import com.schadenfreude.text2speech.platform.FilePicker
-import com.schadenfreude.text2speech.platform.SpeechStreamer
-import com.schadenfreude.text2speech.platform.SttFactory
-import com.schadenfreude.text2speech.platform.getFilePicker
+import com.schadenfreude.text2speech.domain.TranscriptionService
 import com.schadenfreude.text2speech.util.logError
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -64,10 +57,7 @@ data class MainUiState(
 }
 
 class MainViewModel(
-    private val speechStreamer: SpeechStreamer = SttFactory.getSpeechStreamer(),
-    private val filePicker: FilePicker = getFilePicker(),
-    private val sttRepository: SttRepository = DefaultSttRepository(),
-    private val authRepository: AuthRepository = DefaultAuthRepository()
+    private val transcriptionService: TranscriptionService = TranscriptionService()
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -111,86 +101,29 @@ class MainViewModel(
 
         recordingJob?.cancel()
         recordingJob = viewModelScope.launch {
-            var retryCount = 0
-            val maxRetries = 3
+            val config = STTConfig(_uiState.value.selectedLanguage, true)
 
-            while (_uiState.value.isRecording && retryCount < maxRetries) {
-                try {
-                    // Fetch a fresh dynamic token immediately before starting/restarting
-                    val token = authRepository.getAuthToken()
-                    _uiState.update { it.copy(isLoading = false) }
-                    val config = STTConfig(_uiState.value.selectedLanguage, true)
+            transcriptionService.streamAudio(config).collect { result ->
+                _uiState.update { it.copy(isLoading = false) }
+                resetInactivityTimer()
 
-                    _uiState.update { it.copy(partialText = if (retryCount > 0) "Reconnecting..." else "") }
+                when (result) {
+                    is TranscriptionResult.Interim -> {
+                        _uiState.update { it.copy(partialText = result.text) }
+                    }
 
-                    // Start timer after connection is established
-                    startInactivityTimer()
-
-                    speechStreamer.startStreaming(
-                        config = config,
-                        token = token
-                    ) { result ->
-                        resetInactivityTimer()
-                        when (result) {
-                            is TranscriptionResult.Interim -> {
-                                _uiState.update { it.copy(partialText = result.text) }
-                            }
-
-                            is TranscriptionResult.Final -> {
-                                _uiState.update {
-                                    it.copy(
-                                        finalText = (it.finalText + " " + result.text).trim(),
-                                        partialText = ""
-                                    )
-                                }
-                            }
-
-                            is TranscriptionResult.Error -> {
-                                if (result.message.contains("UNAUTHENTICATED", ignoreCase = true) ||
-                                    result.message.contains("401", ignoreCase = true) ||
-                                    result.message.contains(
-                                        "Authentication failed",
-                                        ignoreCase = true
-                                    )
-                                ) {
-                                    // We can't easily throw an exception out of a callback to be caught by the while loop
-                                    // But we can stop and restart or handle it here.
-                                    // For simplicity and matching the request, we just handle results.
-                                    // If we want to retry, we'd need a more complex mechanism.
-                                    // The request says: "simply call speechStreamer.startStreaming(config, token) { result -> ... } 
-                                    // and update the UI state based on the result callback."
-                                    _uiState.update { it.copy(errorMessage = result.message) }
-                                } else {
-                                    if (_uiState.value.isRecording) {
-                                        _uiState.update { it.copy(errorMessage = result.message) }
-                                    }
-                                }
-                            }
+                    is TranscriptionResult.Final -> {
+                        _uiState.update {
+                            it.copy(
+                                finalText = (it.finalText + " " + result.text).trim(),
+                                partialText = ""
+                            )
                         }
                     }
-                    // Break the loop as the streamer is now running and handling results via callback
-                    break
-                } catch (e: Exception) {
-                    if (
-                        (e.message?.contains("Auth expired") == true
-                                || e.message?.contains("401") == true
-                                || e.message?.contains("Authentication failed") == true)
-                        && retryCount < maxRetries
-                    ) {
-                        retryCount++
-                        continue
-                    } else {
-                        if (_uiState.value.isRecording) {
-                            _uiState.update {
-                                it.copy(
-                                    errorMessage = "Stream Error: ${e.message}",
-                                    isLoading = false
-                                )
-                            }
-                        } else {
-                            _uiState.update { it.copy(isLoading = false) }
-                        }
-                        break
+
+                    is TranscriptionResult.Error -> {
+                        _uiState.update { it.copy(errorMessage = result.message) }
+                        stopRecording()
                     }
                 }
             }
@@ -200,7 +133,7 @@ class MainViewModel(
     private fun stopRecording() {
         inactivityJob?.cancel()
         recordingJob?.cancel()
-        speechStreamer.stopStreaming()
+        transcriptionService.stopStreaming()
         _uiState.update { it.copy(isRecording = false, partialText = "") }
     }
 
@@ -222,7 +155,7 @@ class MainViewModel(
 
     fun pickFile() {
         viewModelScope.launch {
-            val file = filePicker.pickFile()
+            val file = transcriptionService.pickFile()
             _uiState.update {
                 it.copy(
                     pickedFile = file,
@@ -249,8 +182,7 @@ class MainViewModel(
 
         viewModelScope.launch {
             try {
-                val token = authRepository.getAuthToken()
-                val result = sttRepository.transcribeFile(file, config, token)
+                val result = transcriptionService.transcribeFile(file, config)
                 _uiState.update {
                     it.copy(
                         isLoading = false,

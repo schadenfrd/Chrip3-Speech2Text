@@ -9,8 +9,12 @@ import com.google.cloud.speech.v2.StreamingRecognitionConfig
 import com.google.cloud.speech.v2.StreamingRecognitionFeatures
 import com.google.cloud.speech.v2.StreamingRecognizeRequest
 import com.schadenfreude.text2speech.BuildKonfig
+import com.schadenfreude.text2speech.data.network.NetworkClientFactory
+import com.schadenfreude.text2speech.domain.GCP_ENABLE_PUNCTUATION
+import com.schadenfreude.text2speech.domain.GCP_SPEECH_MODEL
 import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
+import com.schadenfreude.text2speech.domain.toTranscriptionError
 import com.squareup.wire.GrpcClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +25,8 @@ import okhttp3.OkHttpClient
 import okio.ByteString.Companion.toByteString
 
 class AndroidSpeechStreamer(
-    private val audioRecorder: AudioRecorder = AndroidAudioRecorder()
+    private val audioRecorder: AudioRecorder = AndroidAudioRecorder(),
+    private val sharedOkHttpClient: OkHttpClient = NetworkClientFactory.sharedOkHttpClient
 ) : SpeechStreamer {
     private val scope = CoroutineScope(Dispatchers.IO)
     private var streamingJob: Job? = null
@@ -34,7 +39,7 @@ class AndroidSpeechStreamer(
         streamingJob?.cancel()
         streamingJob = scope.launch {
             try {
-                val okHttpClient = OkHttpClient.Builder()
+                val okHttpClient = sharedOkHttpClient.newBuilder()
                     .addInterceptor { chain ->
                         val request = chain.request().newBuilder()
                             .addHeader("Authorization", "Bearer $token")
@@ -69,10 +74,10 @@ class AndroidSpeechStreamer(
                                                 sample_rate_hertz = 16000,
                                                 audio_channel_count = 1
                                             ),
-                                            model = "chirp_3",
+                                            model = GCP_SPEECH_MODEL,
                                             language_codes = listOf(config.language.languageCode),
                                             features = RecognitionFeatures(
-                                                enable_automatic_punctuation = true
+                                                enable_automatic_punctuation = GCP_ENABLE_PUNCTUATION
                                             ),
                                             adaptation = SpeechAdaptation(
                                                 phrase_sets = listOf(
@@ -116,18 +121,11 @@ class AndroidSpeechStreamer(
                             }
                         }
                     } catch (e: Exception) {
-                        val msg = e.message ?: "Unknown streaming error"
-                        if (msg.contains("UNAUTHENTICATED") || msg.contains("401")) {
-                            onResult(TranscriptionResult.Error("Authentication failed. Reconnecting..."))
-                        } else if (msg.contains("RESOURCE_EXHAUSTED")) {
-                            onResult(TranscriptionResult.Error("API Quota Exceeded. Please try again later."))
-                        } else {
-                            onResult(TranscriptionResult.Error("Stream error: $msg"))
-                        }
+                        onResult(e.toTranscriptionError())
                     }
                 }
             } catch (e: Exception) {
-                onResult(TranscriptionResult.Error(e.message ?: "Unknown error"))
+                onResult(e.toTranscriptionError())
             }
         }
     }

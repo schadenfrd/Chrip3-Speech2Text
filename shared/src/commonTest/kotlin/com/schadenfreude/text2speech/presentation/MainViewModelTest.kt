@@ -5,6 +5,7 @@ import com.schadenfreude.text2speech.data.AuthRepository
 import com.schadenfreude.text2speech.data.SttRepository
 import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
+import com.schadenfreude.text2speech.domain.TranscriptionService
 import com.schadenfreude.text2speech.platform.AudioRecorder
 import com.schadenfreude.text2speech.platform.FilePicker
 import com.schadenfreude.text2speech.platform.SpeechStreamer
@@ -39,6 +40,7 @@ class MainViewModelTest {
             token: String,
             onResult: (TranscriptionResult) -> Unit
         ) {
+            onResult(TranscriptionResult.Interim("Started"))
         }
 
         override fun stopStreaming() {}
@@ -74,10 +76,12 @@ class MainViewModelTest {
     @Test
     fun toggleMode_correctly_switches_between_Live_Stream_and_File_Upload() = runTest {
         val viewModel = MainViewModel(
-            speechStreamer = FakeSpeechStreamer(),
-            filePicker = FakeFilePicker(),
-            sttRepository = FakeSttRepository(),
-            authRepository = FakeAuthRepository()
+            transcriptionService = TranscriptionService(
+                speechStreamer = FakeSpeechStreamer(),
+                filePicker = FakeFilePicker(),
+                sttRepository = FakeSttRepository(),
+                authRepository = FakeAuthRepository()
+            )
         )
 
         viewModel.uiState.test {
@@ -98,10 +102,12 @@ class MainViewModelTest {
     @Test
     fun startRecording_updates_UI_state_to_isRecording_true_and_shows_loading() = runTest {
         val viewModel = MainViewModel(
-            speechStreamer = FakeSpeechStreamer(),
-            filePicker = FakeFilePicker(),
-            sttRepository = FakeSttRepository(),
-            authRepository = FakeAuthRepository()
+            transcriptionService = TranscriptionService(
+                speechStreamer = FakeSpeechStreamer(),
+                filePicker = FakeFilePicker(),
+                sttRepository = FakeSttRepository(),
+                authRepository = FakeAuthRepository()
+            )
         )
 
         viewModel.uiState.test {

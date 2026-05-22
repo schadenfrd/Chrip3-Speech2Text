@@ -1,15 +1,14 @@
 package com.schadenfreude.text2speech.data
 
 import com.schadenfreude.text2speech.BuildKonfig
+import com.schadenfreude.text2speech.data.network.NetworkClientFactory
+import com.schadenfreude.text2speech.domain.GCP_ENABLE_PUNCTUATION
+import com.schadenfreude.text2speech.domain.GCP_SPEECH_MODEL
 import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.util.logError
 import com.schadenfreude.text2speech.util.logInfo
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.plugins.logging.LogLevel
-import io.ktor.client.plugins.logging.Logger
-import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -20,10 +19,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
-import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlin.io.encoding.Base64
 
@@ -36,7 +33,7 @@ data class RestRecognizeRequest(
 
 @Serializable
 data class RestRecognitionConfig(
-    val model: String = "chirp_3",
+    val model: String = GCP_SPEECH_MODEL,
     @SerialName("language_codes")
     val languageCodes: List<String>,
     val features: RestRecognitionFeatures,
@@ -48,7 +45,7 @@ data class RestRecognitionConfig(
 @Serializable
 data class RestRecognitionFeatures(
     @SerialName("enable_automatic_punctuation")
-    val enableAutomaticPunctuation: Boolean = true,
+    val enableAutomaticPunctuation: Boolean = GCP_ENABLE_PUNCTUATION,
 )
 
 @Serializable
@@ -82,25 +79,8 @@ interface SttRepository {
     suspend fun transcribeFile(fileData: ByteArray, config: STTConfig, token: String): String
 }
 
-private val defaultHttpClient = HttpClient {
-    install(ContentNegotiation) {
-        json(Json {
-            ignoreUnknownKeys = true
-            encodeDefaults = true
-        })
-    }
-    install(Logging) {
-        level = LogLevel.INFO
-        logger = object : Logger {
-            override fun log(message: String) {
-                logInfo("Ktor", message)
-            }
-        }
-    }
-}
-
 open class DefaultSttRepository(
-    private val httpClient: HttpClient = defaultHttpClient
+    private val httpClient: HttpClient = NetworkClientFactory.createKtorClient()
 ) : SttRepository {
 
     override suspend fun transcribeFile(
@@ -117,11 +97,12 @@ open class DefaultSttRepository(
 
             val requestBody = RestRecognizeRequest(
                 config = RestRecognitionConfig(
+                    model = GCP_SPEECH_MODEL,
                     languageCodes = listOf(config.language.languageCode),
                     adaptation = RestAdaptation(
                         phraseSets = listOf(RestPhraseSetContext(phraseSet = config.language.phraseSetId))
                     ),
-                    features = RestRecognitionFeatures(enableAutomaticPunctuation = true)
+                    features = RestRecognitionFeatures(enableAutomaticPunctuation = GCP_ENABLE_PUNCTUATION)
                 ),
                 content = base64Audio
             )
