@@ -55,15 +55,6 @@ class MainViewModelTest {
             config: STTConfig,
             token: String
         ): String = ""
-
-        override suspend fun streamAudio(
-            speechClient: Any?,
-            audioFlow: Flow<ByteArray>,
-            config: STTConfig,
-            token: String
-        ): Flow<TranscriptionResult> = flow { }
-
-        override val speechClient: Any? = null
     }
 
     private class FakeAuthRepository : AuthRepository {
@@ -84,7 +75,6 @@ class MainViewModelTest {
     fun toggleMode_correctly_switches_between_Live_Stream_and_File_Upload() = runTest {
         val viewModel = MainViewModel(
             speechStreamer = FakeSpeechStreamer(),
-            audioRecorder = FakeAudioRecorder(),
             filePicker = FakeFilePicker(),
             sttRepository = FakeSttRepository(),
             authRepository = FakeAuthRepository()
@@ -109,7 +99,6 @@ class MainViewModelTest {
     fun startRecording_updates_UI_state_to_isRecording_true_and_shows_loading() = runTest {
         val viewModel = MainViewModel(
             speechStreamer = FakeSpeechStreamer(),
-            audioRecorder = FakeAudioRecorder(),
             filePicker = FakeFilePicker(),
             sttRepository = FakeSttRepository(),
             authRepository = FakeAuthRepository()

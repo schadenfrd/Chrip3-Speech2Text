@@ -11,8 +11,8 @@ import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
 import com.schadenfreude.text2speech.platform.FilePicker
 import com.schadenfreude.text2speech.platform.SpeechStreamer
+import com.schadenfreude.text2speech.platform.SttFactory
 import com.schadenfreude.text2speech.platform.getFilePicker
-import com.schadenfreude.text2speech.platform.getSpeechStreamer
 import com.schadenfreude.text2speech.util.logError
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -64,7 +64,7 @@ data class MainUiState(
 }
 
 class MainViewModel(
-    private val speechStreamer: SpeechStreamer = getSpeechStreamer(),
+    private val speechStreamer: SpeechStreamer = SttFactory.getSpeechStreamer(),
     private val filePicker: FilePicker = getFilePicker(),
     private val sttRepository: SttRepository = DefaultSttRepository(),
     private val authRepository: AuthRepository = DefaultAuthRepository()
