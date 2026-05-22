@@ -37,10 +37,9 @@ class MainViewModelTest {
     private class FakeSpeechStreamer : SpeechStreamer {
         override fun startStreaming(
             config: STTConfig,
-            token: String,
-            onResult: (TranscriptionResult) -> Unit
-        ) {
-            onResult(TranscriptionResult.Interim("Started"))
+            token: String
+        ): Flow<TranscriptionResult> = flow {
+            emit(TranscriptionResult.Interim("Started"))
         }
 
         override fun stopStreaming() {}

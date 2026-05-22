@@ -16,10 +16,9 @@ import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
 import com.schadenfreude.text2speech.domain.toTranscriptionError
 import com.squareup.wire.GrpcClient
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okio.ByteString.Companion.toByteString
@@ -28,111 +27,105 @@ class AndroidSpeechStreamer(
     private val audioRecorder: AudioRecorder = AndroidAudioRecorder(),
     private val sharedOkHttpClient: OkHttpClient = NetworkClientFactory.sharedOkHttpClient
 ) : SpeechStreamer {
-    private val scope = CoroutineScope(Dispatchers.IO)
-    private var streamingJob: Job? = null
 
     override fun startStreaming(
         config: STTConfig,
-        token: String,
-        onResult: (TranscriptionResult) -> Unit
-    ) {
-        streamingJob?.cancel()
-        streamingJob = scope.launch {
-            try {
-                val okHttpClient = sharedOkHttpClient.newBuilder()
-                    .addInterceptor { chain ->
-                        val request = chain.request().newBuilder()
-                            .addHeader("Authorization", "Bearer $token")
-                            .build()
-                        chain.proceed(request)
-                    }
-                    .build()
+        token: String
+    ): Flow<TranscriptionResult> = flow {
+        try {
+            val okHttpClient = sharedOkHttpClient.newBuilder()
+                .addInterceptor { chain ->
+                    val request = chain.request().newBuilder()
+                        .addHeader("Authorization", "Bearer $token")
+                        .build()
+                    chain.proceed(request)
+                }
+                .build()
 
-                val baseUrl = "https://${BuildKonfig.GCP_REGION}-speech.googleapis.com"
-                val grpcClient = GrpcClient.Builder()
-                    .client(okHttpClient)
-                    .baseUrl(baseUrl)
-                    .minMessageToCompress(Long.MAX_VALUE)
-                    .build()
+            val baseUrl = "https://${BuildKonfig.GCP_REGION}-speech.googleapis.com"
+            val grpcClient = GrpcClient.Builder()
+                .client(okHttpClient)
+                .baseUrl(baseUrl)
+                .minMessageToCompress(Long.MAX_VALUE)
+                .build()
 
-                val client = grpcClient.create(SpeechClient::class)
+            val client = grpcClient.create(SpeechClient::class)
 
-                coroutineScope {
-                    val (requestChannel, responseChannel) = client.StreamingRecognize()
-                        .executeIn(this)
+            coroutineScope {
+                val (requestChannel, responseChannel) = client.StreamingRecognize()
+                    .executeIn(this)
 
-                    // 1. Send configuration and then audio
-                    launch {
-                        try {
-                            requestChannel.send(
-                                StreamingRecognizeRequest(
-                                    recognizer = config.language.recognizerId,
-                                    streaming_config = StreamingRecognitionConfig(
-                                        config = RecognitionConfig(
-                                            explicit_decoding_config = ExplicitDecodingConfig(
-                                                encoding = ExplicitDecodingConfig.AudioEncoding.LINEAR16,
-                                                sample_rate_hertz = 16000,
-                                                audio_channel_count = 1
-                                            ),
-                                            model = GCP_SPEECH_MODEL,
-                                            language_codes = listOf(config.language.languageCode),
-                                            features = RecognitionFeatures(
-                                                enable_automatic_punctuation = GCP_ENABLE_PUNCTUATION
-                                            ),
-                                            adaptation = SpeechAdaptation(
-                                                phrase_sets = listOf(
-                                                    SpeechAdaptation.AdaptationPhraseSet(phrase_set = config.language.phraseSetId)
-                                                )
-                                            )
+                // 1. Send configuration and then audio
+                launch {
+                    try {
+                        requestChannel.send(
+                            StreamingRecognizeRequest(
+                                recognizer = config.language.recognizerId,
+                                streaming_config = StreamingRecognitionConfig(
+                                    config = RecognitionConfig(
+                                        explicit_decoding_config = ExplicitDecodingConfig(
+                                            encoding = ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                                            sample_rate_hertz = 16000,
+                                            audio_channel_count = 1
                                         ),
-                                        streaming_features = StreamingRecognitionFeatures(
-                                            interim_results = true
+                                        model = GCP_SPEECH_MODEL,
+                                        language_codes = listOf(config.language.languageCode),
+                                        features = RecognitionFeatures(
+                                            enable_automatic_punctuation = GCP_ENABLE_PUNCTUATION
+                                        ),
+                                        adaptation = SpeechAdaptation(
+                                            phrase_sets = listOf(
+                                                SpeechAdaptation.AdaptationPhraseSet(phrase_set = config.language.phraseSetId)
+                                            )
                                         )
+                                    ),
+                                    streaming_features = StreamingRecognitionFeatures(
+                                        interim_results = true
                                     )
                                 )
                             )
+                        )
 
-                            audioRecorder.startRecording().collect { chunk ->
-                                requestChannel.send(
-                                    StreamingRecognizeRequest(
-                                        audio = chunk.toByteString()
-                                    )
+                        audioRecorder.startRecording().collect { chunk ->
+                            requestChannel.send(
+                                StreamingRecognizeRequest(
+                                    audio = chunk.toByteString()
                                 )
-                            }
-                        } catch (e: Exception) {
-                            // Handle channel closed or other send errors
-                        } finally {
-                            requestChannel.close()
+                            )
                         }
+                    } catch (e: Exception) {
+                        // Handle channel closed or other send errors
+                    } finally {
+                        requestChannel.close()
                     }
+                }
 
-                    // 2. Receive results and call onResult
-                    try {
-                        for (response in responseChannel) {
-                            response.results.forEach { result ->
-                                val transcript = result.alternatives.firstOrNull()?.transcript
-                                if (!transcript.isNullOrBlank()) {
-                                    if (result.is_final) {
-                                        onResult(TranscriptionResult.Final(transcript))
-                                    } else {
-                                        onResult(TranscriptionResult.Interim(transcript))
-                                    }
+                // 2. Receive results and emit
+                try {
+                    for (response in responseChannel) {
+                        response.results.forEach { result ->
+                            val transcript = result.alternatives.firstOrNull()?.transcript
+                            if (!transcript.isNullOrBlank()) {
+                                if (result.is_final) {
+                                    emit(TranscriptionResult.Final(transcript))
+                                } else {
+                                    emit(TranscriptionResult.Interim(transcript))
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        onResult(e.toTranscriptionError())
                     }
+                } catch (e: Exception) {
+                    emit(e.toTranscriptionError())
                 }
-            } catch (e: Exception) {
-                onResult(e.toTranscriptionError())
             }
+        } catch (e: Exception) {
+            emit(e.toTranscriptionError())
+        } finally {
+            audioRecorder.stopRecording()
         }
     }
 
     override fun stopStreaming() {
-        streamingJob?.cancel()
-        streamingJob = null
         audioRecorder.stopRecording()
     }
 }

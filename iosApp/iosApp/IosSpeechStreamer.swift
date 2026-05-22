@@ -7,13 +7,21 @@ import Shared
 /// Modernized Swift implementation of the SpeechStreamer interface using gRPC Swift V2.
 /// This version is refactored to decouple audio recording from network transport.
 @available(iOS 15.0, *)
-class IosSpeechStreamer: NSObject, SpeechStreamer {
+class IosSpeechStreamer: NSObject, NativeIosStreamer {
 
     private var streamingTask: Task<Void, Never>?
     private var continuation: AsyncStream<Google_Cloud_Speech_V2_StreamingRecognizeRequest>.Continuation?
     private let recorder = IosAudioRecorder()
 
-    func startStreaming(config: STTConfig, token: String, onResult: @escaping (TranscriptionResult) -> Void) {
+    func start(config: STTConfig, token: String, onResult: @escaping (TranscriptionResult) -> Void) {
+        self.startStreamingInternal(config: config, token: token, onResult: onResult)
+    }
+
+    func stop() {
+        self.stopStreaming()
+    }
+
+    private func startStreamingInternal(config: STTConfig, token: String, onResult: @escaping (TranscriptionResult) -> Void) {
         // Ensure any previous streaming is stopped
         stopStreaming()
 
@@ -44,12 +52,20 @@ class IosSpeechStreamer: NSObject, SpeechStreamer {
 
                     // 2. Start capturing audio bytes from decoupled recorder and yield to continuation
                     group.addTask {
-                        for await audioData in self.recorder.startRecording() {
-                            let audioRequest = Google_Cloud_Speech_V2_StreamingRecognizeRequest.with {
-                                $0.audio = audioData
+                        do {
+                            for try await audioData in self.recorder.startRecording() {
+                                let audioRequest = Google_Cloud_Speech_V2_StreamingRecognizeRequest.with {
+                                    $0.audio = audioData
+                                }
+                                self.continuation?.yield(audioRequest)
                             }
-                            self.continuation?.yield(audioRequest)
+                        } catch {
+                            // If recorder fails (e.g., interruption or permission denied), notify UI and cleanup
+                            DispatchQueue.main.async {
+                                onResult(TranscriptionResult.Error(message: "Recording Error: \(error.localizedDescription)"))
+                            }
                         }
+                        self.continuation?.finish()
                     }
 
                     // 3. Execute the bidirectional streaming call

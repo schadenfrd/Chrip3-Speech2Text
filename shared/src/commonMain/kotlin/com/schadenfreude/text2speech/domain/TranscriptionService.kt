@@ -8,9 +8,9 @@ import com.schadenfreude.text2speech.platform.FilePicker
 import com.schadenfreude.text2speech.platform.SpeechStreamer
 import com.schadenfreude.text2speech.platform.SttFactory
 import com.schadenfreude.text2speech.platform.getFilePicker
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 
 class TranscriptionService(
     private val speechStreamer: SpeechStreamer = SttFactory.getSpeechStreamer(),
@@ -19,19 +19,12 @@ class TranscriptionService(
     private val authRepository: AuthRepository = DefaultAuthRepository(),
 ) {
 
-    fun streamAudio(config: STTConfig): Flow<TranscriptionResult> = callbackFlow {
+    fun streamAudio(config: STTConfig): Flow<TranscriptionResult> = flow {
         try {
             val token = authRepository.getAuthToken()
-            speechStreamer.startStreaming(config, token) { result ->
-                trySend(result)
-            }
+            emitAll(speechStreamer.startStreaming(config, token))
         } catch (e: Exception) {
-            trySend(TranscriptionResult.Error(e.message ?: "Unknown authorization error"))
-            close(e)
-        }
-
-        awaitClose {
-            speechStreamer.stopStreaming()
+            emit(TranscriptionResult.Error(e.message ?: "Authorization error"))
         }
     }
 

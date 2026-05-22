@@ -8,7 +8,7 @@ struct iOSApp: App {
     init() {
         let streamer = IosSpeechStreamer()
         // Inject it into the Kotlin registry immediately
-        SttFactory_iosKt.setIosSpeechStreamer(streamer: streamer)
+        SttFactory_iosKt.setIosSpeechStreamer(nativeStreamer: streamer)
     }
 
     var body: some Scene {

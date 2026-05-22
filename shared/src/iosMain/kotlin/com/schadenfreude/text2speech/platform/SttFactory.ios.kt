@@ -1,10 +1,10 @@
 package com.schadenfreude.text2speech.platform
 
-
 private var _iosSpeechStreamer: SpeechStreamer? = null
 
-fun setIosSpeechStreamer(streamer: SpeechStreamer) {
-    _iosSpeechStreamer = streamer
+// Swift will call this and pass its NativeIosStreamer implementation
+fun setIosSpeechStreamer(nativeStreamer: NativeIosStreamer) {
+    _iosSpeechStreamer = IosSpeechStreamerWrapper(nativeStreamer)
 }
 
 actual object SttFactory {

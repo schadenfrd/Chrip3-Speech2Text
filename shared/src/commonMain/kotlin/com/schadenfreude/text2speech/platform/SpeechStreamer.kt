@@ -2,6 +2,7 @@ package com.schadenfreude.text2speech.platform
 
 import com.schadenfreude.text2speech.domain.STTConfig
 import com.schadenfreude.text2speech.domain.TranscriptionResult
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Interface for bidirectional gRPC speech streaming.
@@ -13,13 +14,12 @@ interface SpeechStreamer {
      * Starts the streaming process.
      * @param config The STT configuration (language, etc.)
      * @param token The OAuth2 bearer token for authentication.
-     * @param onResult Callback for streaming results (interim, final, or error).
+     * @return A Flow of TranscriptionResult (interim, final, or error).
      */
     fun startStreaming(
         config: STTConfig,
-        token: String,
-        onResult: (TranscriptionResult) -> Unit
-    )
+        token: String
+    ): Flow<TranscriptionResult>
 
     /**
      * Stops the streaming process and releases resources.
